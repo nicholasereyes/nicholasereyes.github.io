@@ -295,13 +295,8 @@
       opacity: 1;
     }
 
-    .fidget-wrap.fidget-dragging {
-      cursor: grabbing;
-      z-index: 20;
-    }
-
-    .fidget-wrap:not(.fidget-dragging) {
-      cursor: grab;
+    .fidget-wrap {
+      cursor: default;
     }
 
     .fidget-well {
@@ -457,10 +452,7 @@
     const syncBarWrap = document.getElementById("syncBarWrap");
 
     const FIDGET_SZ = 88;
-    const FIDGET_DRAG_THRESHOLD = 8;
     const FIDGET_GAP_REM = 1.25;
-    let fidgetDrag = null;
-    let suppressFidgetClick = false;
 
     const JACKPOT_CHANCE = 1 / 20;
     const JACKPOT_DELTA = 20;
@@ -510,26 +502,7 @@
       fidgetWrap.classList.add("fidget-ready");
     }
 
-    function saveFidgetPos() {
-      const l = parseFloat(fidgetWrap.style.left);
-      const t = parseFloat(fidgetWrap.style.top);
-      if (Number.isFinite(l) && Number.isFinite(t)) {
-        localStorage.setItem("fidgetPos", JSON.stringify({ l, t }));
-      }
-    }
-
     function layoutFidgetDefault() {
-      const stored = localStorage.getItem("fidgetPos");
-      if (stored) {
-        try {
-          const p = JSON.parse(stored);
-          if (typeof p.l === "number" && typeof p.t === "number") {
-            applyFidgetPos(p.l, p.t);
-            return;
-          }
-        } catch (_) { /* use geometry default */ }
-      }
-
       const wrap = getWrapEl();
       const well = document.querySelector(".button-well");
       if (!well) return;
@@ -1022,67 +995,9 @@
       if (ev.target === btn) triggerSpring();
     });
 
-    fidgetBtn.addEventListener("click", (ev) => {
-      if (suppressFidgetClick) {
-        ev.preventDefault();
-        suppressFidgetClick = false;
-        return;
-      }
-      onFidgetPress(ev);
-    });
-
-    fidgetWrap.addEventListener("pointerdown", (ev) => {
-      if (ev.button !== 0) return;
-      const wrap = getWrapEl();
-      const fr = wrap.getBoundingClientRect();
-      const curL = parseFloat(fidgetWrap.style.left) || 0;
-      const curT = parseFloat(fidgetWrap.style.top) || 0;
-      fidgetDrag = {
-        id: ev.pointerId,
-        startX: ev.clientX,
-        startY: ev.clientY,
-        origL: curL,
-        origT: curT,
-        moved: false,
-      };
-      try {
-        fidgetWrap.setPointerCapture(ev.pointerId);
-      } catch (_) { /* optional */ }
-    });
-
-    fidgetWrap.addEventListener("pointermove", (ev) => {
-      if (!fidgetDrag || ev.pointerId !== fidgetDrag.id) return;
-      const dx = ev.clientX - fidgetDrag.startX;
-      const dy = ev.clientY - fidgetDrag.startY;
-      if (Math.abs(dx) > FIDGET_DRAG_THRESHOLD || Math.abs(dy) > FIDGET_DRAG_THRESHOLD) {
-        fidgetDrag.moved = true;
-        fidgetWrap.classList.add("fidget-dragging");
-      }
-      if (fidgetDrag.moved) {
-        applyFidgetPos(fidgetDrag.origL + dx, fidgetDrag.origT + dy);
-      }
-    });
-
-    function endFidgetDrag(ev) {
-      if (!fidgetDrag || ev.pointerId !== fidgetDrag.id) return;
-      try {
-        fidgetWrap.releasePointerCapture(ev.pointerId);
-      } catch (_) { /* optional */ }
-      fidgetWrap.classList.remove("fidget-dragging");
-      if (fidgetDrag.moved) {
-        suppressFidgetClick = true;
-        saveFidgetPos();
-      }
-      fidgetDrag = null;
-    }
-
-    fidgetWrap.addEventListener("pointerup", endFidgetDrag);
-    fidgetWrap.addEventListener("pointercancel", endFidgetDrag);
+    fidgetBtn.addEventListener("click", onFidgetPress);
 
     window.addEventListener("resize", onFidgetResize);
-    window.addEventListener("load", () => {
-      layoutFidgetDefault();
-    });
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden || currentCount === null || mainSyncInFlight) return;
