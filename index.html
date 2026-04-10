@@ -337,6 +337,38 @@
     const MAX_BATCH = 1000; // must stay in sync with Apps Script cap
     const JACKPOT_CHANCE = 1 / 20;
     const JACKPOT_DELTA = 20;
+    const DEFAULT_THEME_HEX = "#ff3d2e";
+
+    function normalizeServerState(data) {
+      if (!data || typeof data !== "object") throw new Error("Server returned invalid data");
+      const raw = data.count;
+      const num =
+        typeof raw === "number" && Number.isFinite(raw) ? raw : Number(raw);
+      if (!Number.isFinite(num)) {
+        throw new Error("Server response missing a numeric count");
+      }
+      let col = data.color;
+      if (typeof col !== "string" || !/^#[0-9a-fA-F]{6}$/.test(col.trim())) {
+        col = DEFAULT_THEME_HEX;
+      } else {
+        col = col.trim().toLowerCase();
+      }
+      return { count: Math.floor(num), color: col };
+    }
+
+    async function readJsonBody(res) {
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        const html = text.trimStart().startsWith("<");
+        throw new Error(
+          html
+            ? "Server returned HTML instead of JSON — redeploy the Apps Script web app or check the URL."
+            : "Server returned invalid JSON."
+        );
+      }
+    }
 
     function hexToRgb(hex) {
       const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -576,10 +608,8 @@
       u.searchParams.set("_ts", String(Date.now()));
       const res = await fetch(u.toString(), { method: "GET", cache: "no-store" });
       if (!res.ok) throw new Error("GET failed: " + res.status);
-      const data = await res.json();
-      if (typeof data.count !== "number") throw new Error("Bad response shape");
-      if (typeof data.color !== "string") throw new Error("Bad response shape");
-      return { count: data.count, color: data.color };
+      const data = await readJsonBody(res);
+      return normalizeServerState(data);
     }
 
     async function apiPostIncrement(inc) {
@@ -591,10 +621,10 @@
         cache: "no-store",
       });
       if (!res.ok) throw new Error("POST failed: " + res.status);
-      const data = await res.json();
-      if (typeof data.count !== "number") throw new Error("Bad response shape");
-      if (typeof data.color === "string") applyTheme(data.color);
-      return data.count;
+      const data = await readJsonBody(res);
+      const st = normalizeServerState(data);
+      applyTheme(st.color);
+      return st.count;
     }
 
     async function apiPostRecolor() {
@@ -606,14 +636,17 @@
         cache: "no-store",
       });
       if (!res.ok) throw new Error("POST failed: " + res.status);
-      const data = await res.json();
-      if (data.ok === true && typeof data.count === "number" && typeof data.color === "string") {
-        return { count: data.count, color: data.color };
+      const data = await readJsonBody(res);
+      if (data.ok === true) {
+        return normalizeServerState(data);
       }
       if (data.ok === false && data.error === "need_100") {
-        if (typeof data.count === "number") confirmedCount = data.count;
-        if (typeof data.color === "string") applyTheme(data.color);
-        refreshDisplay();
+        try {
+          const st = normalizeServerState(data);
+          confirmedCount = st.count;
+          applyTheme(st.color);
+          refreshDisplay();
+        } catch (_) { /* ignore partial parse */ }
         throw new Error(`Need at least ${RECOLOR_COST} clicks on the server`);
       }
       throw new Error(data.error || "Recolor failed");
