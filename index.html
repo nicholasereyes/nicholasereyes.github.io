@@ -95,10 +95,21 @@
       animation: countPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     }
 
+    .count-value.tick-jackpot {
+      animation: countJackpot 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
     @keyframes countPop {
       0% { transform: translateY(0) scale(1); filter: brightness(1); }
       35% { transform: translateY(-6px) scale(1.12); filter: brightness(1.25); }
       100% { transform: translateY(0) scale(1); filter: brightness(1); }
+    }
+
+    @keyframes countJackpot {
+      0% { transform: translateY(0) scale(1); filter: brightness(1); }
+      22% { transform: translateY(-12px) scale(1.28); filter: brightness(1.55) saturate(1.35); }
+      55% { transform: translateY(4px) scale(1.06); filter: brightness(1.2); }
+      100% { transform: translateY(0) scale(1); filter: brightness(1) saturate(1); }
     }
 
     .count-label {
@@ -187,6 +198,26 @@
       animation: btnSpring 0.55s cubic-bezier(0.34, 1.45, 0.64, 1);
     }
 
+    .arcade-btn.jackpot-hit {
+      filter: brightness(1.4) saturate(1.35);
+      box-shadow:
+        0 10px 0 var(--accent-shadow),
+        0 14px 0 rgba(0, 0, 0, 0.45),
+        0 0 50px var(--accent-glow),
+        inset 0 4px 12px rgba(255, 255, 255, 0.45),
+        inset 0 -8px 16px rgba(0, 0, 0, 0.25);
+      transition: filter 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .counter-panel.jackpot-flash {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 8px 32px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(0, 0, 0, 0.5),
+        0 0 56px var(--accent-glow);
+      transition: box-shadow 0.15s ease;
+    }
+
     @keyframes btnSpring {
       0% { transform: translate(-50%, -50%) translateY(10px) scale(0.96); }
       40% { transform: translate(-50%, -50%) translateY(-4px) scale(1.04); }
@@ -207,6 +238,14 @@
 
     @keyframes rip {
       to { transform: scale(14); opacity: 0; }
+    }
+
+    @keyframes ripBig {
+      to { transform: scale(22); opacity: 0; }
+    }
+
+    @keyframes ripBurst {
+      to { transform: scale(10); opacity: 0; }
     }
 
     .recolor-btn {
@@ -296,6 +335,8 @@
     let retryMs = 250;
     let retryTimer = null;
     const MAX_BATCH = 1000; // must stay in sync with Apps Script cap
+    const JACKPOT_CHANCE = 1 / 20;
+    const JACKPOT_DELTA = 20;
 
     function hexToRgb(hex) {
       const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -349,26 +390,49 @@
       statusEl.classList.toggle("err", isError);
     }
 
-    function playClickSound() {
+    function playClickSound(jackpot) {
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (!Ctx) return;
         const ctx = new Ctx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "square";
-        const f0 = 280 + Math.random() * 420;
-        const f1 = 70 + Math.random() * 160;
-        const tDrop = 0.045 + Math.random() * 0.035;
-        osc.frequency.setValueAtTime(f0, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(Math.max(40, f1), ctx.currentTime + tDrop);
-        gain.gain.setValueAtTime(0.1 + Math.random() * 0.05, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.1);
-        osc.onended = () => ctx.close();
+        if (jackpot) {
+          const steps = [520, 780, 1040, 660];
+          steps.forEach((freq, i) => {
+            const t0 = ctx.currentTime + i * 0.055;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "square";
+            osc.frequency.setValueAtTime(freq * (0.92 + Math.random() * 0.08), t0);
+            gain.gain.setValueAtTime(0, t0);
+            gain.gain.linearRampToValueAtTime(0.11, t0 + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + 0.22);
+          });
+          setTimeout(() => {
+            try {
+              ctx.close();
+            } catch (_) { /* optional */ }
+          }, 480);
+        } else {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          const f0 = 280 + Math.random() * 420;
+          const f1 = 70 + Math.random() * 160;
+          const tDrop = 0.045 + Math.random() * 0.035;
+          osc.frequency.setValueAtTime(f0, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(Math.max(40, f1), ctx.currentTime + tDrop);
+          gain.gain.setValueAtTime(0.1 + Math.random() * 0.05, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.1);
+          osc.onended = () => ctx.close();
+        }
       } catch (_) { /* optional */ }
     }
 
@@ -384,7 +448,7 @@
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     }
 
-    function burstParticles(clientX, clientY) {
+    function burstParticles(clientX, clientY, jackpot) {
       const dpr = window.devicePixelRatio || 1;
       const w = fxCanvas.clientWidth * dpr;
       const h = fxCanvas.clientHeight * dpr;
@@ -403,24 +467,30 @@
       const outward = Math.atan2(ny - bcy, nx - bcx);
 
       const parts = [];
-      const n = 28;
+      const n = jackpot ? 52 : 28;
+      const spMul = jackpot ? 1.45 : 1;
+      const lifeDecay = jackpot ? 0.038 : 0.045;
+      const maxMs = jackpot ? 780 : 600;
       for (let i = 0; i < n; i++) {
-        const jitter = (Math.random() - 0.5) * 14 * scale;
-        const j2 = (Math.random() - 0.5) * 14 * scale;
+        const jitter = (Math.random() - 0.5) * (jackpot ? 20 : 14) * scale;
+        const j2 = (Math.random() - 0.5) * (jackpot ? 20 : 14) * scale;
         const px = nx + Math.cos(outward + Math.PI / 2) * jitter + Math.cos(outward) * j2 * 0.35;
         const py = ny + Math.sin(outward + Math.PI / 2) * jitter + Math.sin(outward) * j2 * 0.35;
-        const spread = (Math.random() - 0.5) * 1.15;
+        const spread = (Math.random() - 0.5) * (jackpot ? 1.45 : 1.15);
         const a = outward + spread;
-        const sp = (2.8 + Math.random() * 6.5) * scale;
-        const hueJ = accentHueDeg + (Math.random() - 0.5) * 42;
+        const sp = (2.8 + Math.random() * (jackpot ? 9 : 6.5)) * scale * spMul;
+        const hueJ = accentHueDeg + (Math.random() - 0.5) * (jackpot ? 55 : 42);
+        const spark = jackpot && Math.random() < 0.35;
         parts.push({
           x: px,
           y: py,
           vx: Math.cos(a) * sp,
           vy: Math.sin(a) * sp,
           life: 1,
-          r: (2 + Math.random() * 3) * scale,
-          hue: hueJ + (Math.random() > 0.35 ? 0 : (Math.random() > 0.5 ? 18 : -22)),
+          r: (2 + Math.random() * (jackpot ? 4.5 : 3)) * scale,
+          hue: spark ? 48 + Math.random() * 8 : hueJ + (Math.random() > 0.35 ? 0 : (Math.random() > 0.5 ? 18 : -22)),
+          sat: spark ? 96 : 100,
+          light: spark ? 72 : 62,
         });
       }
 
@@ -435,37 +505,53 @@
           alive = true;
           p.x += p.vx;
           p.y += p.vy;
-          p.vy += 0.15 * scale;
-          p.life -= 0.045;
+          p.vy += (jackpot ? 0.12 : 0.15) * scale;
+          p.life -= lifeDecay;
           fxCtx.beginPath();
           const hh = ((p.hue % 360) + 360) % 360;
-          fxCtx.fillStyle = `hsla(${hh}, 100%, 62%, ${Math.max(0, p.life)})`;
+          const sat = p.sat != null ? p.sat : 100;
+          const light = p.light != null ? p.light : 62;
+          fxCtx.fillStyle = `hsla(${hh}, ${sat}%, ${light}%, ${Math.max(0, p.life)})`;
           fxCtx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
           fxCtx.fill();
         }
-        if (alive && elapsed < 600) requestAnimationFrame(frame);
+        if (alive && elapsed < maxMs) requestAnimationFrame(frame);
         else fxCtx.clearRect(0, 0, w, h);
       }
       requestAnimationFrame(frame);
     }
 
-    function rippleAtClick(clientX, clientY) {
+    function rippleAtClick(clientX, clientY, jackpot) {
       const well = document.querySelector(".button-well");
       const wr = well.getBoundingClientRect();
       const cx = clientX - wr.left;
       const cy = clientY - wr.top;
 
       const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff3d2e";
-      const ripple = document.createElement("div");
-      ripple.style.cssText = `
+      function addRipple(extra) {
+        const ripple = document.createElement("div");
+        ripple.style.cssText = extra;
+        well.appendChild(ripple);
+        const ms = jackpot ? 750 : 600;
+        setTimeout(() => ripple.remove(), ms);
+      }
+      well.style.position = "relative";
+      addRipple(`
         position:absolute;left:${cx}px;top:${cy}px;width:20px;height:20px;
         margin:-10px 0 0 -10px;border-radius:50%;
         border:3px solid ${accent};opacity:0.9;pointer-events:none;z-index:4;
-        animation: rip 0.55s ease-out forwards;
-      `;
-      well.style.position = "relative";
-      well.appendChild(ripple);
-      setTimeout(() => ripple.remove(), 600);
+        animation: ${jackpot ? "ripBig" : "rip"} ${jackpot ? "0.65s" : "0.55s"} ease-out forwards;
+      `);
+      if (jackpot) {
+        setTimeout(() => {
+          addRipple(`
+            position:absolute;left:${cx}px;top:${cy}px;width:28px;height:28px;
+            margin:-14px 0 0 -14px;border-radius:50%;
+            border:2px solid rgba(255,248,220,0.95);opacity:0.75;pointer-events:none;z-index:3;
+            animation: ripBurst 0.45s ease-out forwards;
+          `);
+        }, 70);
+      }
     }
 
     function triggerSpring() {
@@ -475,10 +561,10 @@
       setTimeout(() => btn.classList.remove("spring"), 600);
     }
 
-    function animateCount() {
-      countEl.classList.remove("tick");
+    function animateCount(jackpot) {
+      countEl.classList.remove("tick", "tick-jackpot");
       void countEl.offsetWidth;
-      countEl.classList.add("tick");
+      countEl.classList.add(jackpot ? "tick-jackpot" : "tick");
     }
 
     function displayCount(n) {
@@ -668,15 +754,27 @@
       if (btn.disabled) return;
       if (confirmedCount === null || typeof confirmedCount !== "number") return;
 
-      const { x, y } = clientPointFromClick(ev);
-      burstParticles(x, y);
-      rippleAtClick(x, y);
-      playClickSound();
+      const jackpot = Math.random() < JACKPOT_CHANCE;
+      const delta = jackpot ? JACKPOT_DELTA : 1;
 
-      pendingIncrements += 1;
-      animateCount();
+      const { x, y } = clientPointFromClick(ev);
+      burstParticles(x, y, jackpot);
+      rippleAtClick(x, y, jackpot);
+      playClickSound(jackpot);
+
+      pendingIncrements += delta;
+      animateCount(jackpot);
       refreshDisplay();
       setLiveStatus();
+
+      if (jackpot) {
+        btn.classList.add("jackpot-hit");
+        panelEl.classList.add("jackpot-flash");
+        setTimeout(() => {
+          btn.classList.remove("jackpot-hit");
+          panelEl.classList.remove("jackpot-flash");
+        }, 700);
+      }
 
       scheduleFlushSoon();
     }
