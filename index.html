@@ -191,15 +191,6 @@
       100% { transform: translate(-50%, -50%) translateY(0) scale(1); }
     }
 
-    .arcade-btn-inner {
-      pointer-events: none;
-      font-family: "Bebas Neue", sans-serif;
-      font-size: clamp(1.4rem, 5vw, 1.85rem);
-      letter-spacing: 0.15em;
-      color: rgba(40, 10, 8, 0.85);
-      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
-    }
-
     #fx {
       position: absolute;
       left: 50%;
@@ -239,9 +230,7 @@
     <div class="button-stage">
       <canvas id="fx" width="400" height="400" aria-hidden="true"></canvas>
       <div class="button-well">
-        <button type="button" id="pressBtn" class="arcade-btn" disabled aria-label="Press to increment global counter">
-          <span class="arcade-btn-inner">PRESS</span>
-        </button>
+        <button type="button" id="pressBtn" class="arcade-btn" disabled aria-label="Press to increment global counter"></button>
       </div>
     </div>
   </div>
@@ -284,19 +273,34 @@
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = "square";
-        osc.frequency.setValueAtTime(420, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.06);
-        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        const f0 = 280 + Math.random() * 420;
+        const f1 = 70 + Math.random() * 160;
+        const tDrop = 0.045 + Math.random() * 0.035;
+        osc.frequency.setValueAtTime(f0, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, f1), ctx.currentTime + tDrop);
+        gain.gain.setValueAtTime(0.1 + Math.random() * 0.05, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.09);
+        osc.stop(ctx.currentTime + 0.1);
         osc.onended = () => ctx.close();
       } catch (_) { /* optional */ }
     }
 
-    function burstParticles() {
+    function clientPointFromClick(ev) {
+      if (typeof ev.clientX === "number" && typeof ev.clientY === "number") {
+        if (ev.clientX !== 0 || ev.clientY !== 0) return { x: ev.clientX, y: ev.clientY };
+      }
+      if (typeof ev.offsetX === "number" && typeof ev.offsetY === "number" && ev.target === btn) {
+        const r = btn.getBoundingClientRect();
+        return { x: r.left + ev.offsetX, y: r.top + ev.offsetY };
+      }
+      const r = btn.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    function burstParticles(clientX, clientY) {
       const dpr = window.devicePixelRatio || 1;
       const w = fxCanvas.clientWidth * dpr;
       const h = fxCanvas.clientHeight * dpr;
@@ -305,14 +309,25 @@
         fxCanvas.height = h;
       }
       const scale = Math.min(dpr, 2);
-      const px = w / 2;
-      const py = h / 2;
+      const cRect = fxCanvas.getBoundingClientRect();
+      const nx = ((clientX - cRect.left) / Math.max(cRect.width, 1)) * w;
+      const ny = ((clientY - cRect.top) / Math.max(cRect.height, 1)) * h;
+
+      const br = btn.getBoundingClientRect();
+      const bcx = ((br.left + br.width / 2 - cRect.left) / Math.max(cRect.width, 1)) * w;
+      const bcy = ((br.top + br.height / 2 - cRect.top) / Math.max(cRect.height, 1)) * h;
+      const outward = Math.atan2(ny - bcy, nx - bcx);
 
       const parts = [];
       const n = 28;
       for (let i = 0; i < n; i++) {
-        const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
-        const sp = (3 + Math.random() * 6) * scale;
+        const jitter = (Math.random() - 0.5) * 14 * scale;
+        const j2 = (Math.random() - 0.5) * 14 * scale;
+        const px = nx + Math.cos(outward + Math.PI / 2) * jitter + Math.cos(outward) * j2 * 0.35;
+        const py = ny + Math.sin(outward + Math.PI / 2) * jitter + Math.sin(outward) * j2 * 0.35;
+        const spread = (Math.random() - 0.5) * 1.15;
+        const a = outward + spread;
+        const sp = (2.8 + Math.random() * 6.5) * scale;
         parts.push({
           x: px,
           y: py,
@@ -348,12 +363,11 @@
       requestAnimationFrame(frame);
     }
 
-    function rippleAtButtonCenter() {
-      const rect = btn.getBoundingClientRect();
+    function rippleAtClick(clientX, clientY) {
       const well = document.querySelector(".button-well");
       const wr = well.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2 - wr.left;
-      const cy = rect.top + rect.height / 2 - wr.top;
+      const cx = clientX - wr.left;
+      const cy = clientY - wr.top;
 
       const ripple = document.createElement("div");
       ripple.style.cssText = `
@@ -490,12 +504,13 @@
       flushInFlight = false;
     }
 
-    function onPress() {
+    function onPress(ev) {
       if (btn.disabled) return;
       if (confirmedCount === null || typeof confirmedCount !== "number") return;
 
-      burstParticles();
-      rippleAtButtonCenter();
+      const { x, y } = clientPointFromClick(ev);
+      burstParticles(x, y);
+      rippleAtClick(x, y);
       playClickSound();
 
       pendingIncrements += 1;
