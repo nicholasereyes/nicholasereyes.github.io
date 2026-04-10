@@ -261,8 +261,12 @@
     const fxCanvas = document.getElementById("fx");
     const fxCtx = fxCanvas.getContext("2d");
 
-    let currentCount = null;
-    let clickInFlight = false;
+    let confirmedCount = null; // last count confirmed by server
+    let displayedCount = null; // what we show (optimistic)
+    let pendingIncrements = 0; // queued clicks not yet confirmed
+    let flushInFlight = false;
+    let retryMs = 250;
+    let retryTimer = null;
 
     function setStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -387,8 +391,8 @@
       return data.count;
     }
 
-    async function apiPostIncrement() {
-      const body = new URLSearchParams({ op: "increment" });
+    async function apiPostIncrement(inc) {
+      const body = new URLSearchParams({ op: "increment", inc: String(inc) });
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -401,6 +405,14 @@
       return data.count;
     }
 
+    function setLiveStatus() {
+      if (pendingIncrements > 0) {
+        setStatus(`Syncing… (+${pendingIncrements})`);
+      } else {
+        setStatus("Live · shared worldwide");
+      }
+    }
+
     async function loadCount() {
       panelEl.classList.add("loading");
       panelEl.classList.remove("error");
@@ -411,10 +423,11 @@
           throw new Error("Set APPS_SCRIPT_URL in the script");
         }
         const n = await apiGetCount();
-        currentCount = n;
-        displayCount(n);
+        confirmedCount = n;
+        displayedCount = n;
+        displayCount(displayedCount);
         panelEl.classList.remove("loading");
-        setStatus("Live · shared worldwide");
+        setLiveStatus();
         btn.disabled = false;
       } catch (e) {
         panelEl.classList.remove("loading");
@@ -424,38 +437,85 @@
       }
     }
 
-    async function onPress() {
-      if (clickInFlight || btn.disabled) return;
-      clickInFlight = true;
-      btn.disabled = true;
+    function scheduleFlushSoon() {
+      if (flushInFlight) return;
+      if (retryTimer) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        flushQueue();
+      }, 120);
+    }
 
+    async function flushQueue() {
+      if (flushInFlight) return;
+      if (pendingIncrements <= 0) return;
+      flushInFlight = true;
+
+      while (pendingIncrements > 0) {
+        const batch = pendingIncrements;
+        pendingIncrements = 0;
+        setLiveStatus();
+
+        try {
+          const n = await apiPostIncrement(batch);
+          panelEl.classList.remove("error");
+          confirmedCount = n;
+          retryMs = 250;
+
+          // If server count is ahead (other users), jump to it.
+          const nextDisplayed = Math.max(displayedCount ?? n, n);
+          if (nextDisplayed !== displayedCount) {
+            displayedCount = nextDisplayed;
+            animateCount();
+            displayCount(displayedCount);
+          }
+          setLiveStatus();
+        } catch (err) {
+          // Put the batch back and back off; user can keep clicking locally.
+          pendingIncrements += batch;
+          panelEl.classList.add("error");
+          setStatus(`Offline · will retry (${Math.ceil(retryMs / 1000)}s) · queued +${pendingIncrements}`, true);
+
+          flushInFlight = false;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            flushQueue();
+          }, retryMs);
+          retryMs = Math.min(10000, Math.floor(retryMs * 1.8));
+          return;
+        }
+      }
+
+      flushInFlight = false;
+    }
+
+    function onPress() {
+      if (btn.disabled) return;
+      if (displayedCount === null || typeof displayedCount !== "number") return;
+
+      // Immediate gratification: update UI instantly.
       burstParticles();
       rippleAtButtonCenter();
       playClickSound();
 
-      try {
-        const n = await apiPostIncrement();
-        if (n !== currentCount) animateCount();
-        currentCount = n;
-        displayCount(n);
-        setStatus("Live · shared worldwide");
-      } catch (err) {
-        panelEl.classList.add("error");
-        setStatus(err.message || "Increment failed", true);
-        try {
-          currentCount = await apiGetCount();
-          displayCount(currentCount);
-        } catch (_) { /* ignore */ }
-      } finally {
-        clickInFlight = false;
-        btn.disabled = false;
-      }
+      displayedCount += 1;
+      pendingIncrements += 1;
+      animateCount();
+      displayCount(displayedCount);
+      setLiveStatus();
+
+      scheduleFlushSoon();
     }
 
     btn.addEventListener("click", onPress);
     btn.addEventListener("mouseup", triggerSpring);
     btn.addEventListener("touchend", (ev) => {
       if (ev.target === btn) triggerSpring();
+    });
+
+    // If they come back online, try to flush quickly.
+    window.addEventListener("online", () => {
+      if (pendingIncrements > 0) flushQueue();
     });
 
     loadCount();
