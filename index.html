@@ -61,6 +61,8 @@
       justify-content: center;
       padding: 1.5rem;
       gap: 2rem;
+      /* Room for fidget above / beside the main button without overlapping panel */
+      padding-bottom: 2rem;
     }
 
     .counter-panel {
@@ -278,10 +280,28 @@
     }
 
     .fidget-wrap {
-      position: relative;
-      margin-top: 1.25rem;
+      position: absolute;
       width: 88px;
       height: 88px;
+      z-index: 12;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .fidget-wrap.fidget-ready {
+      opacity: 1;
+    }
+
+    .fidget-wrap.fidget-dragging {
+      cursor: grabbing;
+      z-index: 20;
+    }
+
+    .fidget-wrap:not(.fidget-dragging) {
+      cursor: grab;
     }
 
     .fidget-well {
@@ -317,6 +337,7 @@
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
+      z-index: 3;
 
       background: radial-gradient(circle at 35% 30%, #3d6dad 0%, #2a4f7a 42%, #1a3558 100%);
       box-shadow:
@@ -405,16 +426,17 @@
       </div>
     </div>
 
-    <div class="button-stage">
+    <div class="button-stage" id="buttonStage">
       <canvas id="fx" width="400" height="400" aria-hidden="true"></canvas>
       <div class="button-well">
         <button type="button" id="pressBtn" class="arcade-btn" disabled aria-label="Press to increment global counter"></button>
       </div>
-      <div class="fidget-wrap">
-        <canvas id="fidgetFx" width="88" height="88" aria-hidden="true"></canvas>
-        <div class="fidget-well" aria-hidden="true"></div>
-        <button type="button" id="fidgetBtn" class="fidget-btn" aria-label="Fidget — does not change the counter"></button>
-      </div>
+    </div>
+
+    <div id="fidgetWrap" class="fidget-wrap">
+      <canvas id="fidgetFx" width="88" height="88" aria-hidden="true"></canvas>
+      <div class="fidget-well" aria-hidden="true"></div>
+      <button type="button" id="fidgetBtn" class="fidget-btn" aria-label="Fidget — does not change the counter (drag to move)"></button>
     </div>
   </div>
   <p class="footer-hint">GLOBAL COUNTER</p>
@@ -429,9 +451,16 @@
     const fxCanvas = document.getElementById("fx");
     const fxCtx = fxCanvas.getContext("2d");
     const fidgetBtn = document.getElementById("fidgetBtn");
+    const fidgetWrap = document.getElementById("fidgetWrap");
     const fidgetCanvas = document.getElementById("fidgetFx");
     const fidgetCtx = fidgetCanvas.getContext("2d");
     const syncBarWrap = document.getElementById("syncBarWrap");
+
+    const FIDGET_SZ = 88;
+    const FIDGET_DRAG_THRESHOLD = 8;
+    const FIDGET_GAP_REM = 1.25;
+    let fidgetDrag = null;
+    let suppressFidgetClick = false;
 
     const JACKPOT_CHANCE = 1 / 20;
     const JACKPOT_DELTA = 20;
@@ -444,6 +473,88 @@
     function setSyncBarVisible(on) {
       syncBarWrap.classList.toggle("visible", on);
       fidgetBtn.classList.toggle("sync-lit", on);
+    }
+
+    function getWrapEl() {
+      return document.querySelector(".wrap");
+    }
+
+    function clampFidgetPosition(left, top) {
+      const wrap = getWrapEl();
+      const fr = wrap.getBoundingClientRect();
+      const margin = 8;
+      const maxL = Math.max(margin, fr.width - FIDGET_SZ - margin);
+      const maxT = Math.max(margin, fr.height - FIDGET_SZ - margin);
+      let l = Math.min(maxL, Math.max(margin, left));
+      let t = Math.min(maxT, Math.max(margin, top));
+
+      const pr = panelEl.getBoundingClientRect();
+      const fl = fr.left + l;
+      const ft = fr.top + t;
+      const overlapsPanel =
+        fl + FIDGET_SZ > pr.left + 2 &&
+        fl < pr.right - 2 &&
+        ft + FIDGET_SZ > pr.top + 2 &&
+        ft < pr.bottom + 10;
+      if (overlapsPanel) {
+        t = pr.bottom - fr.top + 12;
+        t = Math.min(maxT, Math.max(margin, t));
+      }
+      return { l, t };
+    }
+
+    function applyFidgetPos(left, top) {
+      const c = clampFidgetPosition(left, top);
+      fidgetWrap.style.left = `${c.l}px`;
+      fidgetWrap.style.top = `${c.t}px`;
+      fidgetWrap.classList.add("fidget-ready");
+    }
+
+    function saveFidgetPos() {
+      const l = parseFloat(fidgetWrap.style.left);
+      const t = parseFloat(fidgetWrap.style.top);
+      if (Number.isFinite(l) && Number.isFinite(t)) {
+        localStorage.setItem("fidgetPos", JSON.stringify({ l, t }));
+      }
+    }
+
+    function layoutFidgetDefault() {
+      const stored = localStorage.getItem("fidgetPos");
+      if (stored) {
+        try {
+          const p = JSON.parse(stored);
+          if (typeof p.l === "number" && typeof p.t === "number") {
+            applyFidgetPos(p.l, p.t);
+            return;
+          }
+        } catch (_) { /* use geometry default */ }
+      }
+
+      const wrap = getWrapEl();
+      const well = document.querySelector(".button-well");
+      if (!well) return;
+
+      const fr = wrap.getBoundingClientRect();
+      const wr = well.getBoundingClientRect();
+      const wcx = wr.left + wr.width / 2 - fr.left;
+      const wcy = wr.top + wr.height / 2 - fr.top;
+      const gapPx = FIDGET_GAP_REM * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+      const R = wr.height / 2 + gapPx + FIDGET_SZ / 2;
+      const ang = Math.PI / 4;
+      const cx = wcx + R * Math.cos(ang);
+      const cy = wcy - R * Math.sin(ang);
+      applyFidgetPos(cx - FIDGET_SZ / 2, cy - FIDGET_SZ / 2);
+    }
+
+    let fidgetResizeTimer = null;
+    function onFidgetResize() {
+      clearTimeout(fidgetResizeTimer);
+      fidgetResizeTimer = setTimeout(() => {
+        const l = parseFloat(fidgetWrap.style.left);
+        const t = parseFloat(fidgetWrap.style.top);
+        if (Number.isFinite(l) && Number.isFinite(t)) applyFidgetPos(l, t);
+        else layoutFidgetDefault();
+      }, 120);
     }
 
     function normalizeServerState(data) {
@@ -764,8 +875,7 @@
     }
 
     function fidgetRipple(clientX, clientY) {
-      const wrap = document.querySelector(".fidget-wrap");
-      const wr = wrap.getBoundingClientRect();
+      const wr = fidgetWrap.getBoundingClientRect();
       const cx = clientX - wr.left;
       const cy = clientY - wr.top;
       const ripple = document.createElement("div");
@@ -775,8 +885,8 @@
         border:1px solid rgba(255,255,255,0.35);opacity:0.7;pointer-events:none;z-index:1;
         animation: rip 0.4s ease-out forwards;
       `;
-      wrap.style.position = "relative";
-      wrap.appendChild(ripple);
+      fidgetWrap.style.position = "absolute";
+      fidgetWrap.appendChild(ripple);
       setTimeout(() => ripple.remove(), 450);
     }
 
@@ -912,7 +1022,67 @@
       if (ev.target === btn) triggerSpring();
     });
 
-    fidgetBtn.addEventListener("click", onFidgetPress);
+    fidgetBtn.addEventListener("click", (ev) => {
+      if (suppressFidgetClick) {
+        ev.preventDefault();
+        suppressFidgetClick = false;
+        return;
+      }
+      onFidgetPress(ev);
+    });
+
+    fidgetWrap.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      const wrap = getWrapEl();
+      const fr = wrap.getBoundingClientRect();
+      const curL = parseFloat(fidgetWrap.style.left) || 0;
+      const curT = parseFloat(fidgetWrap.style.top) || 0;
+      fidgetDrag = {
+        id: ev.pointerId,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        origL: curL,
+        origT: curT,
+        moved: false,
+      };
+      try {
+        fidgetWrap.setPointerCapture(ev.pointerId);
+      } catch (_) { /* optional */ }
+    });
+
+    fidgetWrap.addEventListener("pointermove", (ev) => {
+      if (!fidgetDrag || ev.pointerId !== fidgetDrag.id) return;
+      const dx = ev.clientX - fidgetDrag.startX;
+      const dy = ev.clientY - fidgetDrag.startY;
+      if (Math.abs(dx) > FIDGET_DRAG_THRESHOLD || Math.abs(dy) > FIDGET_DRAG_THRESHOLD) {
+        fidgetDrag.moved = true;
+        fidgetWrap.classList.add("fidget-dragging");
+      }
+      if (fidgetDrag.moved) {
+        applyFidgetPos(fidgetDrag.origL + dx, fidgetDrag.origT + dy);
+      }
+    });
+
+    function endFidgetDrag(ev) {
+      if (!fidgetDrag || ev.pointerId !== fidgetDrag.id) return;
+      try {
+        fidgetWrap.releasePointerCapture(ev.pointerId);
+      } catch (_) { /* optional */ }
+      fidgetWrap.classList.remove("fidget-dragging");
+      if (fidgetDrag.moved) {
+        suppressFidgetClick = true;
+        saveFidgetPos();
+      }
+      fidgetDrag = null;
+    }
+
+    fidgetWrap.addEventListener("pointerup", endFidgetDrag);
+    fidgetWrap.addEventListener("pointercancel", endFidgetDrag);
+
+    window.addEventListener("resize", onFidgetResize);
+    window.addEventListener("load", () => {
+      layoutFidgetDefault();
+    });
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden || currentCount === null || mainSyncInFlight) return;
@@ -926,6 +1096,9 @@
     });
 
     loadCount();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(layoutFidgetDefault);
+    });
   </script>
 </body>
 </html>
