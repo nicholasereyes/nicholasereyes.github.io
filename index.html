@@ -261,12 +261,15 @@
     const fxCanvas = document.getElementById("fx");
     const fxCtx = fxCanvas.getContext("2d");
 
-    let confirmedCount = null; // last count confirmed by server
-    let displayedCount = null; // what we show (optimistic)
-    let pendingIncrements = 0; // queued clicks not yet confirmed
+    // Invariant: displayedCount === confirmedCount + pendingIncrements
+    // (confirmedCount = last authoritative server value from GET or successful POST)
+    let confirmedCount = null;
+    let displayedCount = null;
+    let pendingIncrements = 0;
     let flushInFlight = false;
     let retryMs = 250;
     let retryTimer = null;
+    const MAX_BATCH = 1000; // must stay in sync with Apps Script cap
 
     function setStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -407,10 +410,16 @@
 
     function setLiveStatus() {
       if (pendingIncrements > 0) {
-        setStatus(`Syncing… (+${pendingIncrements})`);
+        setStatus(`Syncing… (+${pendingIncrements} queued)`);
       } else {
         setStatus("Live · shared worldwide");
       }
+    }
+
+    function refreshDisplay() {
+      if (confirmedCount === null) return;
+      displayedCount = confirmedCount + pendingIncrements;
+      displayCount(displayedCount);
     }
 
     async function loadCount() {
@@ -424,8 +433,8 @@
         }
         const n = await apiGetCount();
         confirmedCount = n;
-        displayedCount = n;
-        displayCount(displayedCount);
+        pendingIncrements = 0;
+        refreshDisplay();
         panelEl.classList.remove("loading");
         setLiveStatus();
         btn.disabled = false;
@@ -452,8 +461,8 @@
       flushInFlight = true;
 
       while (pendingIncrements > 0) {
-        const batch = pendingIncrements;
-        pendingIncrements = 0;
+        const batch = Math.min(pendingIncrements, MAX_BATCH);
+        pendingIncrements -= batch;
         setLiveStatus();
 
         try {
@@ -461,17 +470,9 @@
           panelEl.classList.remove("error");
           confirmedCount = n;
           retryMs = 250;
-
-          // If server count is ahead (other users), jump to it.
-          const nextDisplayed = Math.max(displayedCount ?? n, n);
-          if (nextDisplayed !== displayedCount) {
-            displayedCount = nextDisplayed;
-            animateCount();
-            displayCount(displayedCount);
-          }
+          refreshDisplay();
           setLiveStatus();
         } catch (err) {
-          // Put the batch back and back off; user can keep clicking locally.
           pendingIncrements += batch;
           panelEl.classList.add("error");
           setStatus(`Offline · will retry (${Math.ceil(retryMs / 1000)}s) · queued +${pendingIncrements}`, true);
@@ -491,17 +492,15 @@
 
     function onPress() {
       if (btn.disabled) return;
-      if (displayedCount === null || typeof displayedCount !== "number") return;
+      if (confirmedCount === null || typeof confirmedCount !== "number") return;
 
-      // Immediate gratification: update UI instantly.
       burstParticles();
       rippleAtButtonCenter();
       playClickSound();
 
-      displayedCount += 1;
       pendingIncrements += 1;
       animateCount();
-      displayCount(displayedCount);
+      refreshDisplay();
       setLiveStatus();
 
       scheduleFlushSoon();
@@ -513,9 +512,20 @@
       if (ev.target === btn) triggerSpring();
     });
 
-    // If they come back online, try to flush quickly.
     window.addEventListener("online", () => {
       if (pendingIncrements > 0) flushQueue();
+    });
+
+    // Pull server truth when tab wakes up (other tabs / other visitors).
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden || confirmedCount === null) return;
+      apiGetCount()
+        .then((n) => {
+          confirmedCount = n;
+          refreshDisplay();
+          setLiveStatus();
+        })
+        .catch(() => {});
     });
 
     loadCount();
