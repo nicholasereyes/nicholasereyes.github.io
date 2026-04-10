@@ -60,7 +60,7 @@
       align-items: center;
       justify-content: center;
       padding: 1.5rem;
-      gap: 2.5rem;
+      gap: 2rem;
     }
 
     .counter-panel {
@@ -129,6 +129,35 @@
     }
 
     .status-line.err { color: var(--accent); }
+
+    .sync-bar-wrap {
+      margin-top: 0.75rem;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+
+    .sync-bar-wrap.visible {
+      opacity: 1;
+    }
+
+    .sync-bar {
+      height: 100%;
+      width: 38%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--accent-dark), var(--accent-light), var(--accent));
+      transform: translateX(-100%);
+      animation: syncSlide 1s ease-in-out infinite;
+    }
+
+    @keyframes syncSlide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(320%); }
+    }
 
     .button-stage {
       position: relative;
@@ -248,30 +277,59 @@
       to { transform: scale(10); opacity: 0; }
     }
 
-    .recolor-btn {
-      margin-top: 0.85rem;
-      padding: 0.45rem 0.75rem;
-      font-family: "Share Tech Mono", monospace;
-      font-size: 0.58rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--metal);
-      border-radius: 3px;
-      cursor: pointer;
-      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    .fidget-wrap {
+      position: relative;
+      margin-top: 1.25rem;
+      width: 72px;
+      height: 72px;
     }
 
-    .recolor-btn:hover:not(:disabled) {
-      color: var(--accent-light);
+    #fidgetFx {
+      position: absolute;
+      inset: 0;
+      width: 72px;
+      height: 72px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .fidget-btn {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1px solid var(--metal);
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease,
+        background 0.2s ease,
+        transform 0.1s ease;
+    }
+
+    .fidget-btn:hover {
       border-color: var(--metal-light);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .fidget-btn:active {
+      transform: scale(0.94);
+    }
+
+    .fidget-btn.sync-lit {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px var(--accent-glow), inset 0 0 12px rgba(255, 255, 255, 0.06);
       background: rgba(255, 255, 255, 0.07);
     }
 
-    .recolor-btn:disabled {
-      cursor: not-allowed;
-      opacity: 0.4;
+    .fidget-btn.fidget-pulse {
+      animation: fidgetPulse 0.22s ease-out;
+    }
+
+    @keyframes fidgetPulse {
+      50% { transform: scale(0.92); filter: brightness(1.15); }
     }
 
     .footer-hint {
@@ -291,11 +349,11 @@
   <div class="wrap">
     <div id="counterPanel" class="counter-panel loading">
       <div id="countValue" class="count-value" aria-live="polite">—</div>
-      <div class="count-label">Click balance</div>
+      <div class="count-label">Total presses</div>
       <div id="statusLine" class="status-line">Connecting…</div>
-      <button type="button" id="recolorBtn" class="recolor-btn" disabled>
-        Randomize global color · 100
-      </button>
+      <div id="syncBarWrap" class="sync-bar-wrap" aria-hidden="true">
+        <div class="sync-bar"></div>
+      </div>
     </div>
 
     <div class="button-stage">
@@ -303,15 +361,15 @@
       <div class="button-well">
         <button type="button" id="pressBtn" class="arcade-btn" disabled aria-label="Press to increment global counter"></button>
       </div>
+      <div class="fidget-wrap">
+        <canvas id="fidgetFx" width="72" height="72" aria-hidden="true"></canvas>
+        <button type="button" id="fidgetBtn" class="fidget-btn" aria-label="Fidget — does not change the counter"></button>
+      </div>
     </div>
   </div>
   <p class="footer-hint">GLOBAL COUNTER</p>
 
   <script>
-    /* ═══════════════════════════════════════════════════════════════════
-       PLACEHOLDER — paste your deployed Web App URL (ends in /exec)
-       Deploy: New deployment → Web app → Execute as: Me → Who has access: Anyone
-       ═══════════════════════════════════════════════════════════════════ */
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwG1icAwmKMc2WiRiPMNnsvI38EpRVun7U0w2IttQr4v2PRjJ5XpJCHHNQ3b4ndaX899g/exec";
 
     const countEl = document.getElementById("countValue");
@@ -320,24 +378,23 @@
     const btn = document.getElementById("pressBtn");
     const fxCanvas = document.getElementById("fx");
     const fxCtx = fxCanvas.getContext("2d");
-    const recolorBtn = document.getElementById("recolorBtn");
+    const fidgetBtn = document.getElementById("fidgetBtn");
+    const fidgetCanvas = document.getElementById("fidgetFx");
+    const fidgetCtx = fidgetCanvas.getContext("2d");
+    const syncBarWrap = document.getElementById("syncBarWrap");
 
-    const RECOLOR_COST = 100;
-    let recolorInFlight = false;
-    let accentHueDeg = 12;
-
-    // Invariant: displayedCount === confirmedCount + pendingIncrements
-    // (confirmedCount = last authoritative server value from GET or successful POST)
-    let confirmedCount = null;
-    let displayedCount = null;
-    let pendingIncrements = 0;
-    let flushInFlight = false;
-    let retryMs = 250;
-    let retryTimer = null;
-    const MAX_BATCH = 1000; // must stay in sync with Apps Script cap
     const JACKPOT_CHANCE = 1 / 20;
     const JACKPOT_DELTA = 20;
     const DEFAULT_THEME_HEX = "#ff3d2e";
+
+    let currentCount = null;
+    let mainSyncInFlight = false;
+    let accentHueDeg = 12;
+
+    function setSyncBarVisible(on) {
+      syncBarWrap.classList.toggle("visible", on);
+      fidgetBtn.classList.toggle("sync-lit", on);
+    }
 
     function normalizeServerState(data) {
       if (!data || typeof data !== "object") throw new Error("Server returned invalid data");
@@ -468,15 +525,36 @@
       } catch (_) { /* optional */ }
     }
 
-    function clientPointFromClick(ev) {
+    function playFidgetSound() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        const f = 380 + Math.random() * 90;
+        osc.frequency.setValueAtTime(f, ctx.currentTime);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.022, ctx.currentTime + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.07);
+        osc.onended = () => ctx.close();
+      } catch (_) { /* optional */ }
+    }
+
+    function clientPointFromClick(ev, el) {
       if (typeof ev.clientX === "number" && typeof ev.clientY === "number") {
         if (ev.clientX !== 0 || ev.clientY !== 0) return { x: ev.clientX, y: ev.clientY };
       }
-      if (typeof ev.offsetX === "number" && typeof ev.offsetY === "number" && ev.target === btn) {
-        const r = btn.getBoundingClientRect();
+      if (typeof ev.offsetX === "number" && typeof ev.offsetY === "number" && ev.target === el) {
+        const r = el.getBoundingClientRect();
         return { x: r.left + ev.offsetX, y: r.top + ev.offsetY };
       }
-      const r = btn.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     }
 
@@ -553,6 +631,55 @@
       requestAnimationFrame(frame);
     }
 
+    function fidgetParticles(clientX, clientY) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = fidgetCanvas.clientWidth * dpr;
+      const h = fidgetCanvas.clientHeight * dpr;
+      if (fidgetCanvas.width !== w || fidgetCanvas.height !== h) {
+        fidgetCanvas.width = w;
+        fidgetCanvas.height = h;
+      }
+      const cRect = fidgetCanvas.getBoundingClientRect();
+      const nx = ((clientX - cRect.left) / Math.max(cRect.width, 1)) * w;
+      const ny = ((clientY - cRect.top) / Math.max(cRect.height, 1)) * h;
+      const parts = [];
+      const n = 10;
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 1.2 + Math.random() * 2.2;
+        parts.push({
+          x: nx,
+          y: ny,
+          vx: Math.cos(a) * sp * dpr,
+          vy: Math.sin(a) * sp * dpr,
+          life: 1,
+          r: (0.8 + Math.random() * 1.2) * dpr,
+          hue: 210 + Math.random() * 40,
+        });
+      }
+      let start = null;
+      function frame(t) {
+        if (!start) start = t;
+        fidgetCtx.clearRect(0, 0, w, h);
+        let alive = false;
+        for (const p of parts) {
+          if (p.life <= 0) continue;
+          alive = true;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life -= 0.09;
+          fidgetCtx.beginPath();
+          const hh = ((p.hue % 360) + 360) % 360;
+          fidgetCtx.fillStyle = `hsla(${hh}, 35%, 58%, ${Math.max(0, p.life) * 0.55})`;
+          fidgetCtx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+          fidgetCtx.fill();
+        }
+        if (alive && t - start < 280) requestAnimationFrame(frame);
+        else fidgetCtx.clearRect(0, 0, w, h);
+      }
+      requestAnimationFrame(frame);
+    }
+
     function rippleAtClick(clientX, clientY, jackpot) {
       const well = document.querySelector(".button-well");
       const wr = well.getBoundingClientRect();
@@ -586,6 +713,23 @@
       }
     }
 
+    function fidgetRipple(clientX, clientY) {
+      const wrap = document.querySelector(".fidget-wrap");
+      const wr = wrap.getBoundingClientRect();
+      const cx = clientX - wr.left;
+      const cy = clientY - wr.top;
+      const ripple = document.createElement("div");
+      ripple.style.cssText = `
+        position:absolute;left:${cx}px;top:${cy}px;width:12px;height:12px;
+        margin:-6px 0 0 -6px;border-radius:50%;
+        border:1px solid rgba(255,255,255,0.35);opacity:0.7;pointer-events:none;z-index:1;
+        animation: rip 0.4s ease-out forwards;
+      `;
+      wrap.style.position = "relative";
+      wrap.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 450);
+    }
+
     function triggerSpring() {
       btn.classList.remove("spring");
       void btn.offsetWidth;
@@ -613,7 +757,7 @@
     }
 
     async function apiPostIncrement(inc) {
-      const body = new URLSearchParams({ op: "increment", inc: String(inc) });
+      const body = new URLSearchParams({ inc: String(inc) });
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -627,188 +771,44 @@
       return st.count;
     }
 
-    async function apiPostRecolor() {
-      const body = new URLSearchParams({ op: "recolor" });
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("POST failed: " + res.status);
-      const data = await readJsonBody(res);
-      if (data.ok === true || data.recolored === true) {
-        return normalizeServerState(data);
-      }
-      if (data.ok === false && data.error === "need_100") {
-        try {
-          const st = normalizeServerState(data);
-          confirmedCount = st.count;
-          applyTheme(st.color);
-          refreshDisplay();
-        } catch (_) { /* ignore partial parse */ }
-        throw new Error(`Need at least ${RECOLOR_COST} clicks on the server`);
-      }
-      if (
-        data.count != null &&
-        data.ok === undefined &&
-        data.recolored === undefined &&
-        data.error === undefined
-      ) {
-        throw new Error(
-          "Recolor hit the wrong server handler (usually old Apps Script). Paste the latest code.gs, Deploy → New version."
-        );
-      }
-      throw new Error(data.error || "Recolor failed");
-    }
-
-    function setLiveStatus() {
-      if (pendingIncrements > 0) {
-        setStatus(`Syncing… (+${pendingIncrements} queued)`);
-      } else {
-        setStatus("Live · shared worldwide");
-      }
-      updateRecolorButton();
-    }
-
-    function updateRecolorButton() {
-      if (!recolorBtn) return;
-      const bal = confirmedCount === null ? 0 : confirmedCount + pendingIncrements;
-      recolorBtn.textContent = `Randomize global color · ${RECOLOR_COST} (${bal} banked)`;
-      const canTry = confirmedCount !== null && bal >= RECOLOR_COST && !recolorInFlight;
-      recolorBtn.disabled = !canTry || btn.disabled;
-    }
-
-    function refreshDisplay() {
-      if (confirmedCount === null) return;
-      displayedCount = confirmedCount + pendingIncrements;
-      displayCount(displayedCount);
-      updateRecolorButton();
-    }
-
     async function loadCount() {
       panelEl.classList.add("loading");
       panelEl.classList.remove("error");
       btn.disabled = true;
       setStatus("Loading count…");
+      setSyncBarVisible(true);
       try {
         if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PASTE_YOUR")) {
           throw new Error("Set APPS_SCRIPT_URL in the script");
         }
         const st = await apiFetchState();
-        confirmedCount = st.count;
+        currentCount = st.count;
         applyTheme(st.color);
-        pendingIncrements = 0;
-        refreshDisplay();
+        displayCount(currentCount);
         panelEl.classList.remove("loading");
-        setLiveStatus();
+        setStatus("Live · shared worldwide");
         btn.disabled = false;
-        updateRecolorButton();
       } catch (e) {
         panelEl.classList.remove("loading");
         panelEl.classList.add("error");
         setStatus(e.message || "Could not load", true);
         btn.disabled = true;
-        updateRecolorButton();
-      }
-    }
-
-    function scheduleFlushSoon() {
-      if (flushInFlight) return;
-      if (retryTimer) return;
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        flushQueue();
-      }, 120);
-    }
-
-    async function ensureFullyFlushed() {
-      for (let attempt = 0; attempt < 120 && pendingIncrements > 0; attempt++) {
-        while (flushInFlight) {
-          await new Promise((r) => setTimeout(r, 30));
-        }
-        await flushQueue();
-        await new Promise((r) => setTimeout(r, 40));
-      }
-    }
-
-    async function flushQueue() {
-      if (flushInFlight) return;
-      if (pendingIncrements <= 0) return;
-      flushInFlight = true;
-
-      while (pendingIncrements > 0) {
-        const batch = Math.min(pendingIncrements, MAX_BATCH);
-        pendingIncrements -= batch;
-        setLiveStatus();
-
-        try {
-          const n = await apiPostIncrement(batch);
-          panelEl.classList.remove("error");
-          confirmedCount = n;
-          retryMs = 250;
-          refreshDisplay();
-          setLiveStatus();
-        } catch (err) {
-          pendingIncrements += batch;
-          panelEl.classList.add("error");
-          setStatus(`Offline · will retry (${Math.ceil(retryMs / 1000)}s) · queued +${pendingIncrements}`, true);
-
-          flushInFlight = false;
-          retryTimer = setTimeout(() => {
-            retryTimer = null;
-            flushQueue();
-          }, retryMs);
-          retryMs = Math.min(10000, Math.floor(retryMs * 1.8));
-          return;
-        }
-      }
-
-      flushInFlight = false;
-    }
-
-    async function onRecolorClick() {
-      if (recolorInFlight || recolorBtn.disabled) return;
-      recolorInFlight = true;
-      btn.disabled = true;
-      recolorBtn.disabled = true;
-      setStatus("Syncing clicks, then spending…");
-      try {
-        await ensureFullyFlushed();
-        if (pendingIncrements > 0) throw new Error("Still syncing — try again");
-        const st = await apiPostRecolor();
-        confirmedCount = st.count;
-        applyTheme(st.color);
-        animateCount();
-        refreshDisplay();
-        panelEl.classList.remove("error");
-        setLiveStatus();
-      } catch (e) {
-        panelEl.classList.add("error");
-        setStatus(e.message || "Could not change color", true);
       } finally {
-        recolorInFlight = false;
-        if (confirmedCount !== null) btn.disabled = false;
-        updateRecolorButton();
+        setSyncBarVisible(false);
       }
     }
 
-    function onPress(ev) {
-      if (btn.disabled) return;
-      if (confirmedCount === null || typeof confirmedCount !== "number") return;
+    async function onMainPress(ev) {
+      if (btn.disabled || mainSyncInFlight || currentCount === null) return;
 
       const jackpot = Math.random() < JACKPOT_CHANCE;
-      const delta = jackpot ? JACKPOT_DELTA : 1;
+      const inc = jackpot ? JACKPOT_DELTA : 1;
+      const { x, y } = clientPointFromClick(ev, btn);
 
-      const { x, y } = clientPointFromClick(ev);
       burstParticles(x, y, jackpot);
       rippleAtClick(x, y, jackpot);
       playClickSound(jackpot);
-
-      pendingIncrements += delta;
       animateCount(jackpot);
-      refreshDisplay();
-      setLiveStatus();
 
       if (jackpot) {
         btn.classList.add("jackpot-hit");
@@ -819,30 +819,58 @@
         }, 700);
       }
 
-      scheduleFlushSoon();
+      mainSyncInFlight = true;
+      btn.disabled = true;
+      setSyncBarVisible(true);
+      setStatus("Syncing…");
+
+      try {
+        const n = await apiPostIncrement(inc);
+        currentCount = n;
+        displayCount(n);
+        panelEl.classList.remove("error");
+        setStatus("Live · shared worldwide");
+      } catch (err) {
+        panelEl.classList.add("error");
+        setStatus(err.message || "Sync failed", true);
+        try {
+          const st = await apiFetchState();
+          currentCount = st.count;
+          applyTheme(st.color);
+          displayCount(currentCount);
+        } catch (_) { /* ignore */ }
+      } finally {
+        mainSyncInFlight = false;
+        btn.disabled = currentCount === null;
+        setSyncBarVisible(false);
+      }
     }
 
-    btn.addEventListener("click", onPress);
+    function onFidgetPress(ev) {
+      const { x, y } = clientPointFromClick(ev, fidgetBtn);
+      playFidgetSound();
+      fidgetParticles(x, y);
+      fidgetRipple(x, y);
+      fidgetBtn.classList.remove("fidget-pulse");
+      void fidgetBtn.offsetWidth;
+      fidgetBtn.classList.add("fidget-pulse");
+    }
+
+    btn.addEventListener("click", onMainPress);
     btn.addEventListener("mouseup", triggerSpring);
     btn.addEventListener("touchend", (ev) => {
       if (ev.target === btn) triggerSpring();
     });
 
-    recolorBtn.addEventListener("click", onRecolorClick);
+    fidgetBtn.addEventListener("click", onFidgetPress);
 
-    window.addEventListener("online", () => {
-      if (pendingIncrements > 0) flushQueue();
-    });
-
-    // Pull server truth when tab wakes up (other tabs / other visitors).
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden || confirmedCount === null) return;
+      if (document.hidden || currentCount === null || mainSyncInFlight) return;
       apiFetchState()
         .then((st) => {
-          confirmedCount = st.count;
+          currentCount = st.count;
           applyTheme(st.color);
-          refreshDisplay();
-          setLiveStatus();
+          displayCount(currentCount);
         })
         .catch(() => {});
     });
