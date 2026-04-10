@@ -637,7 +637,7 @@
       });
       if (!res.ok) throw new Error("POST failed: " + res.status);
       const data = await readJsonBody(res);
-      if (data.ok === true) {
+      if (data.ok === true || data.recolored === true) {
         return normalizeServerState(data);
       }
       if (data.ok === false && data.error === "need_100") {
@@ -648,6 +648,16 @@
           refreshDisplay();
         } catch (_) { /* ignore partial parse */ }
         throw new Error(`Need at least ${RECOLOR_COST} clicks on the server`);
+      }
+      if (
+        data.count != null &&
+        data.ok === undefined &&
+        data.recolored === undefined &&
+        data.error === undefined
+      ) {
+        throw new Error(
+          "Recolor hit the wrong server handler (usually old Apps Script). Paste the latest code.gs, Deploy → New version."
+        );
       }
       throw new Error(data.error || "Recolor failed");
     }
